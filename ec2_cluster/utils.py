@@ -88,4 +88,43 @@ def get_config_params():
     config_param_list = yaml.safe_load(open(param_list_yaml_abspath, 'r'))["params"]
     return config_param_list
 
+def setup_node_communication(sh, cluster):
+    """
+    Sets up ssh communication between all nodes in a cluster
+    :param cluster: an ec2 cluster object
+    :return:
+    """
+    create_hostfile(sh, cluster)
+    create_ssh_comm(sh)
+    return
+
+def create_ssh_comm(sh):
+    sh.run_on_master('ssh-keygen -t rsa -N "" -f ${HOME}/.ssh/id_rsa')
+    sh.run_on_all('printf "Host *\n\tForwardAgent yes\n\tStrictHostKeyChecking no\n" >> ${HOME}/.ssh/config')
+    sh.run_on_all('printf "\tUserKnownHostsFile=/dev/null\n" >> ${HOME}/.ssh/config')
+    sh.run_on_all('printf "\tLogLevel=ERROR\n\tServerAliveInterval=30\n" >> ${HOME}/.ssh/config')
+    sh.run_on_all('printf "\tUser ubuntu\n" >> ${HOME}/.ssh/config')
+    private_key = sh.run_on_master("cat $HOME/.ssh/id_rsa")
+    public_key = sh.run_on_master("cat $HOME/.ssh/id_rsa.pub")
+    sh.run_on_all('printf "{0}" >> $HOME/.ssh/authorized_keys'.format(public_key.stdout))
+    sh.run_on_workers('printf "{0}" >> $HOME/.ssh/id_rsa'.format(private_key.stdout))
+    sh.run_on_workers('echo "{0}" >> $HOME/.ssh/id_rsa'.format(private_key.stdout))
+    sh.run_on_all('chmod 600 $HOME/.ssh/id_rsa')
+    return
+
+def create_hostfile(sh, cluster, outfile='hosts'):
+    gpu_counts = get_gpu_counts(sh)
+    slots = {ip: count for ip, count in zip(cluster.private_ips, gpu_counts)}
+    hosts = ''
+    for i, j in slots.items():
+        hosts += "{0}\tslots={1}\n".format(i, j)
+    sh.run_on_all("printf \"{0}\" >> {1}".format(hosts, outfile))
+    return
+
+def get_gpu_counts(sh):
+    counts = sh.run_on_all('nvidia-smi --query-gpu=gpu_name --format=csv | wc -l')
+    counts = [int(count.stdout)-1 for count in counts]
+    return counts
+
+
 

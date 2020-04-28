@@ -166,6 +166,13 @@ class ClusterShell:
         results = self._all_conns.run(cmd, **run_kwargs)
         return list(results.values())
 
+    def run_on_workers(self, cmd, **run_kwargs):
+        """ Run a shell command only on worker nodes.
+        :param cmd: The shell command to run
+        :param run_kwargs: Keyword args to pass to fabric.run()
+        :return: List of invoke.Result objects
+        """
+        results = self._worker_conns.run(cmd, **run_kwargs)
 
     # TODO: Confirm this is required with (10+ nodes)
     def _run_on_all_workaround(self, cmd, group_size, **run_kwargs):
@@ -292,6 +299,17 @@ class ClusterShell:
 
         local_abs_path = Path(local_path).absolute()
         self.copy_from_local_to_master(local_abs_path, remote_path)
+        for worker_conn in self._individual_worker_conns:
+            worker_conn.put(local_abs_path, remote_path)
+
+    def copy_from_local_to_workers(self, local_path, remote_path):
+        """
+        Copy a file from the local file system to worker nodes.
+        :param local_path:
+        :param remote_path:
+        :return:
+        """
+        local_abs_path = Path(local_path).absolute()
         for worker_conn in self._individual_worker_conns:
             worker_conn.put(local_abs_path, remote_path)
 

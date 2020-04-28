@@ -282,6 +282,7 @@ class EC2Node:
                iam_ec2_role_name,
                instance_type,
                placement_group_name=None,
+               efa=False,
                iops=None,
                eia_type=None,
                ebs_optimized=True,
@@ -303,6 +304,8 @@ class EC2Node:
         :param security_group_ids: A list of security group ids to attach. Must be a non-empty list
         :param iam_ec2_role_name: The name of the EC2 role. The name, not the ARN.
         :param instance_type: The API name of the instance type to launch, e.g. 'p3.16xlarge'
+        :param efa: Whether to enable EFA on this instance. Only supported for
+                    c5n, i3en, inf1, m5dn, m5n, r5dn, r5n, and p3dn instances.
         :param placement_group_name: Optional. The name of a placement group to launch the instance into.
         :param iops: If volume_type == 'io1', the number of provisioned IOPS for the EBS volume.
         :param eia_type: Optional. The Elastic Inference Accelerator type, e.g. 'eia1.large'
@@ -336,6 +339,11 @@ class EC2Node:
                 assert tag['Key'] != "Name", "'Name' tag cannot be included as a tag. It will be set according to " \
                                              "the Name defined at instantiation"
                 assert 'Value' in tag.keys(), "Each tag must have both a 'Key' and a 'Value' field. 'Value' missing"
+        if efa:
+            assert instance_type in ['c5n.18xlarge', 'c5n.metal', 'i3en.24xlarge',
+                                     'i3en.metal', 'inf1.24xlarge', 'm5dn.24xlarge',
+                                     'm5n.24xlarge', 'r5dn.24xlarge', 'r5n.24xlarge',
+                                     'p3dn.24xlarge'], "EFA not supported on instance type {0}".format(instance_type)
 
 
 
@@ -369,7 +377,6 @@ class EC2Node:
         if iops:
             ebs_params['Iops'] = iops
 
-
         ########################################################
         # Ensure there are never two nodes with the same name
         ########################################################
@@ -377,41 +384,53 @@ class EC2Node:
         if self.is_running_or_pending():
             raise RuntimeError(f'Instance with Name {self.name} already exists')
 
+        #############################################
+        # Construct args
+        #############################################
+
+        args = {}
+        args['BlockDeviceMappings'] = [
+                {
+                    'DeviceName': "/dev/xvda",
+                    'Ebs': ebs_params,
+                },
+            ]
+        args['ImageId'] = ami_id
+        args['InstanceType'] = instance_type
+        args['KeyName'] = key_name
+        args['MaxCount'] = 1
+        args['MinCount'] = 1
+        args['Monitoring'] = {
+                'Enabled': False
+            }
+        args['Placement'] = placement_params
+        if efa:
+            args['NetworkInterfaces'] = [{'SubnetId': subnet_id,
+                                            'DeviceIndex': 0,
+                                            'DeleteOnTermination': True,
+                                            'InterfaceType':'efa',
+                                            'Groups': security_group_ids}]
+        else:
+            args['SubnetId'] = subnet_id
+        args['DryRun'] = dry_run
+        args['EbsOptimized'] = ebs_optimized
+        args['IamInstanceProfile'] = {
+                'Name': iam_ec2_role_name
+            }
+        args['ElasticInferenceAccelerators'] = eia_param_list
+        args['TagSpecifications'] = [
+                {
+                    'ResourceType': 'instance',
+                    'Tags': all_tags
+                },
+            ]
 
         #############################################
         # Make the API call
         #############################################
 
         response = self.ec2_client.run_instances(
-            BlockDeviceMappings=[
-                {
-                    'DeviceName': "/dev/xvda",
-                    'Ebs': ebs_params,
-                },
-            ],
-            ImageId=ami_id,
-            InstanceType=instance_type,
-            KeyName=key_name,
-            MaxCount=1,
-            MinCount=1,
-            Monitoring={
-                'Enabled': False
-            },
-            Placement=placement_params,
-            SecurityGroupIds=security_group_ids,
-            SubnetId=subnet_id,
-            DryRun=dry_run,
-            EbsOptimized=ebs_optimized,
-            IamInstanceProfile={
-                'Name': iam_ec2_role_name
-            },
-            ElasticInferenceAccelerators=eia_param_list,
-            TagSpecifications=[
-                {
-                    'ResourceType': 'instance',
-                    'Tags': all_tags
-                },
-            ]
+        **args
         )
         return response
 
@@ -722,6 +741,7 @@ class EC2NodeCluster:
                iam_ec2_role_name,
                instance_type,
                use_placement_group=False,
+               efa=False,
                iops=None,
                eia_type=None,
                ebs_optimized=True,
@@ -800,6 +820,7 @@ class EC2NodeCluster:
                                     iam_ec2_role_name,
                                     instance_type,
                                     placement_group_name=self.cluster_placement_group_name if use_placement_group else None,
+                                    efa=efa,
                                     iops=iops,
                                     eia_type=eia_type,
                                     ebs_optimized=ebs_optimized,
@@ -1086,6 +1107,7 @@ class ConfigCluster:
                             iam_ec2_role_name=self.config.iam_ec2_role_name,
                             instance_type=self.config.instance_type,
                             use_placement_group=self.config.placement_group,
+                            efa=self.config.efa,
                             iops=self.config.iops,
                             ebs_optimized=self.config.ebs_optimized,
                             tags=self.config.additional_tags,

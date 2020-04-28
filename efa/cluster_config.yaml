@@ -1,0 +1,35 @@
+# Naming
+cluster_template_name: "jbsnyder-efa-docker"
+cluster_id: 1
+
+# Launch Location
+region: "us-east-1"
+vpc_id : "vpc-f6570b8d"
+subnet_id: "subnet-58b35b04" # Must match AZ
+
+
+# AMI
+ami_id: "ami-085925f297f89fce1" # Deep Learning AMI 24.3, us-west-2 (Late Oct 2019)
+ebs_snapshot_id: "snap-0f70c3b7343376ea2" # Snapshot for DLAMI 24.3
+username: "ubuntu"
+
+# EBS
+volume_type: "gp2"
+volume_gbs: 100
+
+# Launch Settings
+instance_type: "p3dn.24xlarge"
+node_count: 2
+
+iam_ec2_role_name: "jbsnyder"
+key_name: "jbsnyder"
+security_group_ids:
+  - "sg-0e096224eed46cfb2" # armand-ssh
+
+# EFA settings
+efa: Yes
+placement: "jbsnyder-p3dn-1b"
+
+# EC2Cluster behavior args
+cluster_create_timeout_secs: 600  # Fail after 10 minutes without an increase in the cluster size
+ebs_optimized: No  # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSOptimized.html
