@@ -88,6 +88,29 @@ def get_config_params():
     config_param_list = yaml.safe_load(open(param_list_yaml_abspath, 'r'))["params"]
     return config_param_list
 
+def setup_container_communication(sh):
+    sh.run_on_all('mkdir ssh_container')
+    sh.run_on_all('cp hosts ssh_container/')
+    sh.run_on_master('ssh-keygen -t rsa -N "" -f ${HOME}/ssh_container/id_rsa')
+    sh.run_on_all('printf "Host *\n\tForwardAgent yes\n\tStrictHostKeyChecking no\n" >> ${HOME}/ssh_container/config')
+    sh.run_on_all('printf "\tUserKnownHostsFile=/dev/null\n" >> ${HOME}/ssh_container/config')
+    sh.run_on_all('printf "\tLogLevel=ERROR\n\tServerAliveInterval=30\n" >> ${HOME}/ssh_container/config')
+    sh.run_on_all('printf "\tUser ubuntu\n" >> ${HOME}/ssh_container/config')
+    private_key = sh.run_on_master("cat $HOME/ssh_container/id_rsa")
+    public_key = sh.run_on_master("cat $HOME/ssh_container/id_rsa.pub")
+    sh.run_on_all('printf "{0}" >> $HOME/ssh_container/authorized_keys'.format(public_key.stdout))
+    sh.run_on_workers('echo "{0}" >> $HOME/ssh_container/id_rsa'.format(private_key.stdout))
+    sh.run_on_all('chmod 600 $HOME/.ssh/id_rsa')
+    sh.run_on_all('sudo chown root:root ${HOME}/ssh_container/config')
+    sh.run_on_all('printf "#!/bin/bash\n" >> $HOME/.ssh/mpicont.sh')
+    sh.run_on_all('printf "echo \\"entering container\\"\n" >> $HOME/.ssh/mpicont.sh')
+    sh.run_on_all('printf "docker exec mpicont /bin/bash -c \\"\\$SSH_ORIGINAL_COMMAND\\"\n" >> $HOME/.ssh/mpicont.sh')
+    sh.run_on_all('chmod +x $HOME/.ssh/mpicont.sh')
+    sh.run_on_all('printf "command=\\"bash $HOME/.ssh/mpicont.sh\\"" >> $HOME/.ssh/authorized_keys')
+    sh.run_on_all('printf ",no-port-forwarding,no-agent-forwarding,no-X11-forwarding " >> $HOME/.ssh/authorized_keys')
+    sh.run_on_all('printf "{0}\n" >> $HOME/.ssh/authorized_keys'.format(public_key.stdout))
+
+
 def setup_node_communication(sh, cluster):
     """
     Sets up ssh communication between all nodes in a cluster
@@ -107,7 +130,6 @@ def create_ssh_comm(sh):
     private_key = sh.run_on_master("cat $HOME/.ssh/id_rsa")
     public_key = sh.run_on_master("cat $HOME/.ssh/id_rsa.pub")
     sh.run_on_all('printf "{0}" >> $HOME/.ssh/authorized_keys'.format(public_key.stdout))
-    sh.run_on_workers('printf "{0}" >> $HOME/.ssh/id_rsa'.format(private_key.stdout))
     sh.run_on_workers('echo "{0}" >> $HOME/.ssh/id_rsa'.format(private_key.stdout))
     sh.run_on_all('chmod 600 $HOME/.ssh/id_rsa')
     return
